@@ -19,6 +19,7 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
@@ -29,10 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"slices"
-
-	"sigs.k8s.io/karpenter/pkg/operator/logging"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
