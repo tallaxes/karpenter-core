@@ -357,9 +357,13 @@ var _ = Describe("StaticCapacity", func() {
 				},
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: nodePool.Spec.Template.Labels,
+						},
 						Spec: v1.NodeClaimTemplateSpec{
-							Requirements: nodePool.Spec.Template.Spec.Requirements,
-							NodeClassRef: nodePool.Spec.Template.Spec.NodeClassRef,
+							Requirements:  nodePool.Spec.Template.Spec.Requirements,
+							NodeClassRef:  nodePool.Spec.Template.Spec.NodeClassRef,
+							StartupTaints: nodePool.Spec.Template.Spec.StartupTaints,
 						},
 					},
 				},
