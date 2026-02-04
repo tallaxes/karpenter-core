@@ -38,11 +38,13 @@ var _ = Describe("StaticCapacity", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values: []string{
-						"c-16x-amd64-linux",
-						"c-16x-arm64-linux",
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
 					},
 				})
 			}
@@ -127,11 +129,13 @@ var _ = Describe("StaticCapacity", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values: []string{
-						"c-16x-amd64-linux",
-						"c-16x-arm64-linux",
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
 					},
 				})
 			}
@@ -253,11 +257,13 @@ var _ = Describe("StaticCapacity", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(10))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values: []string{
-						"c-16x-amd64-linux",
-						"c-16x-arm64-linux",
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
 					},
 				})
 			}
@@ -332,38 +338,38 @@ var _ = Describe("StaticCapacity", func() {
 		var dynamicNodePool *v1.NodePool
 		var label map[string]string
 		BeforeEach(func() {
-			// Create a static NodePool
-			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
+			// Apply KWOK requirements first (needed by both pools)
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values: []string{
-						"c-16x-amd64-linux",
-						"c-16x-arm64-linux",
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
 					},
 				})
 			}
+			// Copy nodePool for dynamic use before applying static-specific modifications.
+			// This ensures dynamicNodePool inherits all provider-specific configuration
+			// (e.g., StartupTaints, Labels) from the default nodePool.
+			dynamicNodePool = test.NodePool(
+				lo.FromPtr(nodePool),
+				v1.NodePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "dynamic-nodepool",
+					},
+				},
+			)
+			// Apply static-specific modifications
+			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 			nodePool.Spec.Template.Spec.Taints = []corev1.Taint{
 				{
 					Key:    "static",
 					Effect: corev1.TaintEffectNoExecute,
 				},
 			}
-			// Create a dynamic NodePool
-			dynamicNodePool = test.NodePool(v1.NodePool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "dynamic-nodepool",
-				},
-				Spec: v1.NodePoolSpec{
-					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimTemplateSpec{
-							Requirements: nodePool.Spec.Template.Spec.Requirements,
-							NodeClassRef: nodePool.Spec.Template.Spec.NodeClassRef,
-						},
-					},
-				},
-			})
 			label = map[string]string{"app": "large-app"}
 		})
 
@@ -431,11 +437,13 @@ var _ = Describe("StaticCapacity", func() {
 		BeforeEach(func() {
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values: []string{
-						"c-16x-amd64-linux",
-						"c-16x-arm64-linux",
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
 					},
 				})
 			}
