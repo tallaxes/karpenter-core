@@ -77,7 +77,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, cloudProvid
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "static.deprovisioning")
 
-	if !nodepoolutils.IsManaged(np, c.cloudProvider) || np.Spec.Replicas == nil {
+	if !nodepoolutils.IsManaged(np, c.cloudProvider) || np.Spec.Replicas == nil || !np.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
 
