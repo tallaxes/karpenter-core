@@ -240,10 +240,10 @@ func (p *Provisioner) NewScheduler(
 	pods []*corev1.Pod,
 	stateNodes []*state.StateNode,
 	opts ...scheduler.Options,
-) (*scheduler.Scheduler, error) {
+) (*scheduler.Scheduler, []*corev1.Pod, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
 	if err != nil {
-		return nil, fmt.Errorf("listing nodepools, %w", err)
+		return nil, nil, fmt.Errorf("listing nodepools, %w", err)
 	}
 	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
 		if nodepoolutils.IsStatic(np) {
@@ -256,7 +256,7 @@ func (p *Provisioner) NewScheduler(
 		return np.DeletionTimestamp.IsZero()
 	})
 	if len(nodePools) == 0 {
-		return nil, ErrNodePoolsNotFound
+		return nil, nil, ErrNodePoolsNotFound
 	}
 
 	// nodeTemplates generated from NodePools are ordered by weight
@@ -273,7 +273,7 @@ func (p *Provisioner) NewScheduler(
 				continue
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, fmt.Errorf("getting instance types, %w", err)
+				return nil, nil, fmt.Errorf("getting instance types, %w", err)
 			}
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
 			continue
@@ -290,20 +290,20 @@ func (p *Provisioner) NewScheduler(
 	// Pods that fail volume topology lookup are excluded from scheduling.
 	pods, volumeReqs, err := p.getVolumeTopologyRequirements(ctx, pods)
 	if err != nil {
-		return nil, fmt.Errorf("getting volume topology requirements, %w", err)
+		return nil, nil, fmt.Errorf("getting volume topology requirements, %w", err)
 	}
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("tracking topology counts, %w", err)
+		return nil, nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
 	daemonSetPods, err := p.getDaemonSetPods(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getting daemon pods, %w", err)
+		return nil, nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), pods, nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -351,7 +351,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduler.IgnorePreferences)
 	}
-	s, err := p.NewScheduler(
+	s, schedulablePods, err := p.NewScheduler(
 		ctx,
 		pods,
 		nodes.Active(),
@@ -372,7 +372,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	results, err := s.Solve(timeoutCtx, pods)
+	results, err := s.Solve(timeoutCtx, schedulablePods)
 	// context errors are ignored because we want to finish provisioning for what has already been scheduled
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return scheduler.Results{}, err

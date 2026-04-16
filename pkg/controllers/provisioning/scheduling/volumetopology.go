@@ -79,6 +79,11 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]sc
 		var newAlts []scheduling.Requirements
 		for _, existing := range alternatives {
 			for _, volReq := range volAlts {
+				if existing != nil && volReq != nil {
+					if err := existing.Intersects(volReq); err != nil {
+						continue
+					}
+				}
 				merged := scheduling.NewRequirements()
 				if existing != nil {
 					merged.Add(existing.Values()...)
@@ -86,6 +91,9 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]sc
 				merged.Add(volReq.Values()...)
 				newAlts = append(newAlts, merged)
 			}
+		}
+		if len(newAlts) == 0 {
+			return nil, fmt.Errorf("incompatible volume topology requirements across pod volumes")
 		}
 		alternatives = newAlts
 	}
