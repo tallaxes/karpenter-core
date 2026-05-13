@@ -99,7 +99,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		opts = append(opts, scheduling.IgnorePreferences)
 	}
 	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
-	scheduler, err := provisioner.NewScheduler(
+	scheduler, schedulablePods, err := provisioner.NewScheduler(
 		log.IntoContext(ctx, operatorlogging.NopLogger),
 		pods,
 		stateNodes,
@@ -113,7 +113,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods)
+	results, err := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), schedulablePods)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("scheduling pods, %w", err)
 	}

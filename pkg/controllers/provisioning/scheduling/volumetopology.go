@@ -75,19 +75,10 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]sc
 			continue
 		}
 
-		// Cross product: alternatives = alternatives X volAlts
-		var newAlts []scheduling.Requirements
-		for _, existing := range alternatives {
-			for _, volReq := range volAlts {
-				merged := scheduling.NewRequirements()
-				if existing != nil {
-					merged.Add(existing.Values()...)
-				}
-				merged.Add(volReq.Values()...)
-				newAlts = append(newAlts, merged)
-			}
+		alternatives, err = mergeVolumeRequirementAlternatives(alternatives, volAlts)
+		if err != nil {
+			return nil, err
 		}
-		alternatives = newAlts
 	}
 
 	// If we still have just the initial empty alternative, there are no volume requirements
@@ -99,6 +90,29 @@ func (v *VolumeTopology) GetRequirements(ctx context.Context, pod *v1.Pod) ([]sc
 		WithValues("Pod", klog.KObj(pod), "alternatives", len(alternatives)).
 		V(1).Info("getting requirements from pod volumes")
 	return alternatives, nil
+}
+
+func mergeVolumeRequirementAlternatives(alternatives, volAlts []scheduling.Requirements) ([]scheduling.Requirements, error) {
+	var mergedAlternatives []scheduling.Requirements
+	for _, existing := range alternatives {
+		for _, volReq := range volAlts {
+			if existing != nil && volReq != nil {
+				if err := existing.Intersects(volReq); err != nil {
+					continue
+				}
+			}
+			merged := scheduling.NewRequirements()
+			if existing != nil {
+				merged.Add(existing.Values()...)
+			}
+			merged.Add(volReq.Values()...)
+			mergedAlternatives = append(mergedAlternatives, merged)
+		}
+	}
+	if len(mergedAlternatives) == 0 {
+		return nil, fmt.Errorf("incompatible volume topology requirements across pod volumes")
+	}
+	return mergedAlternatives, nil
 }
 
 func (v *VolumeTopology) getRequirements(ctx context.Context, pod *v1.Pod, volume v1.Volume) ([]scheduling.Requirements, error) {

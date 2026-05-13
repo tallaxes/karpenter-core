@@ -3012,6 +3012,85 @@ var _ = Context("Scheduling", func() {
 			Expect(node1.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
 			Expect(node0.Labels[corev1.LabelTopologyZone]).ToNot(Equal(node1.Labels[corev1.LabelTopologyZone]))
 		})
+		It("should not schedule pods when multi-volume topology alternatives are disjoint on a custom key", func() {
+			const rackTopologyKey = "topology.custom.csi/rack"
+
+			scA := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "disjoint-a"},
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: rackTopologyKey, Values: []string{"rack-1"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: rackTopologyKey, Values: []string{"rack-2"}}}},
+				},
+			})
+			scB := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "disjoint-b"},
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-1"}}, {Key: rackTopologyKey, Values: []string{"rack-3"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-2"}}, {Key: rackTopologyKey, Values: []string{"rack-4"}}}},
+				},
+			})
+			pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "disjoint-pvc-a"},
+				StorageClassName: lo.ToPtr(scA.Name),
+			})
+			pvcB := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "disjoint-pvc-b"},
+				StorageClassName: lo.ToPtr(scB.Name),
+			})
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:             metav1.ObjectMeta{Name: "disjoint-volume-pod"},
+				PersistentVolumeClaims: []string{pvcA.Name, pvcB.Name},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool, scA, scB, pvcA, pvcB, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+
+			var nodeList corev1.NodeList
+			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+			Expect(nodeList.Items).To(HaveLen(0))
+		})
+		It("should schedule pods when a valid multi-volume topology alternative remains after pruning disjoint branches", func() {
+			cloudProvider.InstanceTypes = fake.InstanceTypes(5)
+
+			scA := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "pruned-overlap-a"},
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: fake.ExoticInstanceLabelKey, Values: []string{"required"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: fake.ExoticInstanceLabelKey, Values: []string{"optional"}}}},
+				},
+			})
+			scB := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta:        metav1.ObjectMeta{Name: "pruned-overlap-b"},
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				AllowedTopologies: []corev1.TopologySelectorTerm{
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-1"}}, {Key: fake.ExoticInstanceLabelKey, Values: []string{"optional"}}}},
+					{MatchLabelExpressions: []corev1.TopologySelectorLabelRequirement{{Key: corev1.LabelTopologyZone, Values: []string{"test-zone-2"}}, {Key: fake.ExoticInstanceLabelKey, Values: []string{"required"}}}},
+				},
+			})
+			pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "pruned-overlap-pvc-a"},
+				StorageClassName: lo.ToPtr(scA.Name),
+			})
+			pvcB := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta:       metav1.ObjectMeta{Name: "pruned-overlap-pvc-b"},
+				StorageClassName: lo.ToPtr(scB.Name),
+			})
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta:             metav1.ObjectMeta{Name: "pruned-overlap-pod"},
+				PersistentVolumeClaims: []string{pvcA.Name, pvcB.Name},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool, scA, scB, pvcA, pvcB, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-1"))
+			Expect(node.Labels).To(HaveKeyWithValue(fake.ExoticInstanceLabelKey, "optional"))
+		})
 		It("should launch nodes for pods with ephemeral volume using the specified storage class name", func() {
 			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
 			sc := test.StorageClass(test.StorageClassOptions{
@@ -4144,7 +4223,7 @@ var _ = Context("Scheduling", func() {
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
-			s, err := prov.NewScheduler(ctx, pods, nil, scheduling.DisableReservedCapacityFallback)
+			s, schedulablePods, err := prov.NewScheduler(ctx, pods, nil, scheduling.DisableReservedCapacityFallback)
 			Expect(err).To(BeNil())
 
 			var wg sync.WaitGroup
@@ -4158,7 +4237,7 @@ var _ = Context("Scheduling", func() {
 					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
 				}, time.Second).Should(Succeed())
 			}()
-			_, err = s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+			_, err = s.Solve(injection.WithControllerName(ctx, "provisioner"), schedulablePods)
 			Expect(err).To(BeNil())
 
 			wg.Wait()
@@ -4216,9 +4295,9 @@ var _ = Context("Scheduling", func() {
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
-			s, err := prov.NewScheduler(ctx, pods, nil, scheduling.DisableReservedCapacityFallback)
+			s, schedulablePods, err := prov.NewScheduler(ctx, pods, nil, scheduling.DisableReservedCapacityFallback)
 			Expect(err).To(BeNil())
-			_, err = s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+			_, err = s.Solve(injection.WithControllerName(ctx, "provisioner"), schedulablePods)
 			Expect(err).To(BeNil())
 
 			m, ok := FindMetricWithLabelValues("karpenter_scheduler_scheduling_duration_seconds", map[string]string{"controller": "provisioner"})
@@ -4922,9 +5001,9 @@ var _ = Context("Scheduling", func() {
 				// Create the test pod with specified options
 				pod := test.Pod(podOptions)
 
-				scheduler, err := prov.NewScheduler(ctx, []*corev1.Pod{pod}, nil)
+				scheduler, schedulablePods, err := prov.NewScheduler(ctx, []*corev1.Pod{pod}, nil)
 				Expect(err).ToNot(HaveOccurred())
-				results, err := scheduler.Solve(ctx, []*corev1.Pod{pod})
+				results, err := scheduler.Solve(ctx, schedulablePods)
 				Expect(err).ToNot(HaveOccurred())
 
 				if expectNodeClaims {
